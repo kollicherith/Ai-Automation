@@ -1,12 +1,15 @@
 # Free 24/7 AI Automation Stack
 
-A permanently-running n8n automation server at no monthly cost, reachable from a
-phone browser. Oracle Cloud Always Free ARM VM → Docker → n8n Community Edition
-behind Caddy with real HTTPS on a free DuckDNS domain, free LLM APIs wired in,
-nightly backups.
+A permanently-running n8n automation server at no monthly cost. Oracle Cloud
+Always Free ARM VM → Docker → n8n Community Edition behind HTTPS, free LLM APIs
+wired in, nightly backups.
 
-**Final state:** `https://<name>.duckdns.org` serving n8n with a valid padlock,
-unlimited workflow executions, and no monthly bill.
+**This build:** region `eu-west-1` (Dublin), private access over Tailscale,
+Groq + Gemini + Cerebras wired in as LLM providers.
+
+**Final state:** `https://ck-automation.<tailnet>.ts.net` serving n8n with a
+valid certificate, unlimited workflow executions, and no monthly bill —
+reachable from your own devices only, with nothing open to the internet.
 
 The build instructions live in the skill at
 [`.claude/skills/free-ai-automation-stack/`](.claude/skills/free-ai-automation-stack/).
@@ -30,25 +33,27 @@ a 2 OCPU / 12 GB shape succeeds far more often and is ample for n8n.
 **Free LLM tiers cap requests, not cost.** Groq gives roughly 30 requests a
 minute — enough for real automation, not enough for anything tight-looped. Most
 free tiers also train on what you send, so keep other people's data off them.
-See [free-llm-providers.md](.claude/skills/free-ai-automation-stack/references/free-llm-providers.md).
+Setup for your three is in [docs/llm-credentials.md](docs/llm-credentials.md);
+the wider comparison is in
+[free-llm-providers.md](.claude/skills/free-ai-automation-stack/references/free-llm-providers.md).
 
 ## Phases
 
 | Phase | What | Where |
 |---|---|---|
-| 0 | Decide region, subdomain, public vs Tailscale, LLM providers | you + Claude |
+| 0 | Decide region, access mode, LLM providers | done — see above |
 | 1 | Provision the Oracle VM | browser, then `scripts/launch-retry.sh` if capacity fails |
-| 2 | Swap, firewall (both layers), Docker | `scripts/bootstrap.sh` |
-| 3 | DuckDNS domain + auto-refresh | browser, then `scripts/duckdns-setup.sh` |
-| 4 | Deploy n8n + Caddy, get the certificate | `scripts/deploy.sh` |
-| 5 | Wire in free LLM credentials | n8n UI |
+| 2 | Swap, Docker (no ports opened) | `scripts/bootstrap.sh --tailscale` |
+| 3 | Join the tailnet, enable HTTPS | `scripts/tailscale-up.sh` |
+| 4 | Deploy n8n, publish over `tailscale serve` | `scripts/deploy.sh --tailscale` |
+| 5 | Wire in Groq, Gemini and Cerebras credentials | n8n UI — [docs/llm-credentials.md](docs/llm-credentials.md) |
 | 6 | Nightly backups | `scripts/backup-n8n.sh` |
 | 7 | Verify | `scripts/verify.sh` |
 
-Claude stops and waits for you at the browser steps: Oracle signup, DuckDNS
-registration, API keys. Everything else is scripted.
+Claude stops and waits for you at the browser steps: Oracle signup, the
+Tailscale login URL, and the three API keys. Everything else is scripted.
 
-## Usage
+## Usage — private mode (this build)
 
 On the VM, after SSH works:
 
@@ -56,27 +61,61 @@ On the VM, after SSH works:
 git clone https://github.com/kollicherith/Ai-Automation.git ~/Ai-Automation
 cd ~/Ai-Automation/stack
 
-bash scripts/bootstrap.sh                       # --tailscale to skip opening ports
-newgrp docker                                   # or log out and back in
-bash scripts/duckdns-setup.sh <subdomain> <token>
-bash scripts/deploy.sh <subdomain>.duckdns.org Europe/Dublin
+bash scripts/bootstrap.sh --tailscale     # swap + docker, firewall left shut
+newgrp docker                             # or log out and back in
+bash scripts/tailscale-up.sh ck-automation # prints the login URL, then your .ts.net name
+bash scripts/deploy.sh --tailscale <name>.ts.net Europe/Dublin
 
 cp scripts/backup-n8n.sh ~/backup-n8n.sh && chmod +x ~/backup-n8n.sh
 (crontab -l 2>/dev/null; echo "0 3 * * * ~/backup-n8n.sh >> ~/backups/backup.log 2>&1") | crontab -
 
-bash scripts/verify.sh <subdomain>.duckdns.org
+bash scripts/verify.sh <name>.ts.net
 ```
 
-Then open `https://<subdomain>.duckdns.org` and **create the owner account
-immediately** — an unclaimed n8n on the public internet belongs to whoever finds
-it first.
+Install the Tailscale app on your phone, sign in to the same account, and open
+`https://<name>.ts.net`. **Create the owner account immediately** — leaving n8n
+unclaimed is a bad habit even on a private tailnet.
+
+### What Tailscale costs you
+
+Two real trade-offs, both fixable, neither a surprise you should hit in week two:
+
+- **Your phone needs the Tailscale app**, on and connected. The browser alone
+  will not reach it. Free tier covers 3 users and 100 devices.
+- **Inbound webhooks don't work from outside your tailnet.** GitHub, Stripe, a
+  form service — none of them can call an n8n webhook that only your devices can
+  see. If you need that, expose *only* the webhook path and leave the editor
+  private:
+
+  ```bash
+  sudo tailscale funnel --bg --set-path /webhook http://localhost:5678/webhook
+  ```
+
+  Funnel is free and still opens no ports on the VM. Do not funnel the whole
+  service — that publishes the editor UI too.
+
+Outbound calls (an HTTP Request node, an LLM API, sending mail) are unaffected.
+Schedule triggers are unaffected.
+
+## Usage — public mode (if you switch later)
+
+Everything for the DuckDNS + Caddy path is still here. `scripts/bootstrap.sh`
+without `--tailscale` opens the instance firewall, `scripts/duckdns-setup.sh`
+registers the DNS refresh, and `scripts/deploy.sh <subdomain>.duckdns.org`
+deploys behind Caddy. You would need the OCI Console ingress rules as well —
+see the note below.
 
 ## What the scripts assume
 
-- `bootstrap.sh` only does layer 2 of the firewall. **Layer 1 is the OCI Console
-  Security List and no script can do it for you** — missing it is the single most
-  common cause of "I followed the guide and nothing loads". The script prints the
-  exact path to click.
+- **In public mode, `bootstrap.sh` only does layer 2 of the firewall. Layer 1 is
+  the OCI Console Security List and no script can do it for you** — missing it is
+  the single most common cause of "I followed the guide and nothing loads". The
+  script prints the exact path to click. In Tailscale mode this does not apply:
+  leave both layers shut.
+- `tailscale-up.sh` fails loudly if HTTPS Certificates aren't enabled for your
+  tailnet (admin console → Settings → Features). That is the Tailscale equivalent
+  of the two-firewall trap — the raw error is not obvious, so the script
+  translates it.
 - `deploy.sh` never regenerates `N8N_ENCRYPTION_KEY` if `.env` already exists.
   Back that key up. Without it, every stored credential is permanently
   unreadable after a rebuild.
@@ -100,6 +139,9 @@ The scripts are the skill's commands made idempotent and re-runnable, plus:
   cause of an instance that gets slow after a few weeks.
 - **`extra_hosts: host.docker.internal`** is set from the start, so adding Ollama
   later needs no compose edit. It is a no-op until Ollama exists.
+- **A second compose file for private mode.** `docker-compose.tailscale.yml`
+  drops Caddy and publishes n8n on `127.0.0.1:5678` only, so the sole route in is
+  `tailscale serve`. `verify.sh` asserts it is not listening on `0.0.0.0`.
 - **Backup cleans up its own exports** from `./files` after tarring them, so they
   do not accumulate in the n8n files volume.
 
