@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Blocks secrets from entering the repo. Install with:
+#   bash stack/scripts/install-git-hooks.sh
+# Bypass (only when you are certain): git commit --no-verify
+set -uo pipefail
+
+fail=0
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[[ -z "$staged" ]] && exit 0
+
+block() { echo "BLOCKED: $1" >&2; fail=1; }
+
+# 1. Files that must never be committed, whatever they contain.
+while IFS= read -r f; do
+  case "$f" in
+    .env|*/.env|*.pem|*.key|id_rsa|id_ed25519|*/id_rsa|*/id_ed25519) block "$f - secret file" ;;
+    *.tar.gz|*.tar.gz.age) block "$f - backup archive (holds decrypted credentials)" ;;
+    launch.json|*/launch.json) block "$f - OCI launch payload (tenancy OCIDs, SSH key)" ;;
+    */identity.txt|identity.txt) block "$f - age private key" ;;
+    */Caddyfile) block "$f - rendered Caddyfile (use Caddyfile.template)" ;;
+  esac
+done <<< "$staged"
+
+# 2. Secret-shaped content in the staged diff. Skip the example/doc files that
+#    legitimately show the SHAPE of a key without being one: the example env
+#    file, the credentials guide, this hook's own pattern list, and the hook's
+#    test suite, whose fixtures are deliberately key-shaped and entirely fake.
+diff=$(git diff --cached -U0 -- $(printf '%s\n' "$staged" \
+  | grep -vE '(\.env\.example|docs/llm-credentials\.md|\.githooks/pre-commit|stack/scripts/test-git-hooks\.sh)$' | tr '\n' ' ') 2>/dev/null)
+
+while IFS='|' read -r label pattern; do
+  [[ -z "$label" ]] && continue
+  if grep -qE "^\+.*$pattern" <<< "$diff"; then block "$label found in staged changes"; fi
+done <<'PATTERNS'
+Groq API key|gsk_[A-Za-z0-9]{20,}
+OpenAI-style API key|\bsk-[A-Za-z0-9_-]{20,}
+Google API key|AIza[A-Za-z0-9_-]{30,}
+Private key block|BEGIN [A-Z ]*PRIVATE KEY
+n8n encryption key|N8N_ENCRYPTION_KEY=[a-f0-9]{32,}
+age private key|AGE-SECRET-KEY-1[A-Z0-9]{20,}
+Oracle OCID|ocid1\.(tenancy|user|compartment|instance)\.oc1
+DuckDNS token|token=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}
+PATTERNS
+
+if [[ $fail -ne 0 ]]; then
+  cat >&2 <<'MSG'
+
+Commit refused. Nothing was committed.
+
+If a flagged file is genuinely safe, either add it to .gitignore or, if you are
+certain, re-run with --no-verify. Do not use --no-verify to "just get past it" -
+a key in git history stays in git history even after you delete the file.
+MSG
+  exit 1
+fi
+exit 0

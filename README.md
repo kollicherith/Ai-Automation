@@ -11,6 +11,10 @@ Groq + Gemini + Cerebras wired in as LLM providers.
 valid certificate, unlimited workflow executions, and no monthly bill —
 reachable from your own devices only, with nothing open to the internet.
 
+**Start here if you're picking this up cold:**
+[docs/decisions.md](docs/decisions.md) — every choice made and why, what's still
+open, and what's been deliberately left undone.
+
 The build instructions live in the skill at
 [`.claude/skills/free-ai-automation-stack/`](.claude/skills/free-ai-automation-stack/).
 Hand it to Claude Code and it works through the phases. This repo holds the
@@ -47,8 +51,9 @@ the wider comparison is in
 | 3 | Join the tailnet, enable HTTPS | `scripts/tailscale-up.sh` |
 | 4 | Deploy n8n, publish over `tailscale serve` | `scripts/deploy.sh --tailscale` |
 | 5 | Wire in Groq, Gemini and Cerebras credentials | n8n UI — [docs/llm-credentials.md](docs/llm-credentials.md) |
-| 6 | Nightly backups | `scripts/backup-n8n.sh` |
+| 6 | Nightly encrypted backups | `scripts/backup-n8n.sh` |
 | 7 | Verify | `scripts/verify.sh` |
+| — | Hardening (any time after Phase 2) | `scripts/harden.sh` — see [docs/security.md](docs/security.md) |
 
 Claude stops and waits for you at the browser steps: Oracle signup, the
 Tailscale login URL, and the three API keys. Everything else is scripted.
@@ -65,6 +70,7 @@ bash scripts/bootstrap.sh --tailscale     # swap + docker, firewall left shut
 newgrp docker                             # or log out and back in
 bash scripts/tailscale-up.sh ck-automation # prints the login URL, then your .ts.net name
 bash scripts/deploy.sh --tailscale <name>.ts.net Europe/Dublin
+bash scripts/harden.sh --tailscale        # SSH, fail2ban, auto-updates, backup key
 
 cp scripts/backup-n8n.sh ~/backup-n8n.sh && chmod +x ~/backup-n8n.sh
 (crontab -l 2>/dev/null; echo "0 3 * * * ~/backup-n8n.sh >> ~/backups/backup.log 2>&1") | crontab -
@@ -125,6 +131,27 @@ see the note below.
   a backup.
 - Never `docker compose down -v`. The `-v` deletes the named volumes, and your
   workflows with them.
+- The n8n image is **pinned to 2.40.3**. `docker compose pull` alone will not
+  move you off it — bump `N8N_VERSION` in `.env` deliberately. Untagged meant
+  `latest`, and n8n 3.x is already in nightly builds.
+- Backups are `age`-encrypted and the script refuses to upload an unencrypted
+  one. Restore with `scripts/restore.sh`. The private key is printed once by
+  `harden.sh` — put it in your password manager then, not later.
+
+## Security
+
+Threat model, what's covered, and the residual risks are in
+[docs/security.md](docs/security.md). The short version: nothing is open to the
+internet except SSH, Code nodes can't read the encryption key out of the
+environment, backups are encrypted before they leave the VM, and a pre-commit
+hook blocks secrets from reaching git.
+
+Install the hook once per clone — git doesn't copy hooks:
+
+```bash
+bash stack/scripts/install-git-hooks.sh
+bash stack/scripts/test-git-hooks.sh   # 17 cases, both directions
+```
 
 ## Differences from the skill's inline snippets
 

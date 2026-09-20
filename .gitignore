@@ -1,16 +1,33 @@
-# Never commit these - the encryption key decrypts every stored credential,
-# and the exports are decrypted plaintext.
+# --- Secrets: never commit these ---
+# The encryption key decrypts every stored credential; the exports are plaintext.
 .env
-stack/.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Rendered at deploy time from Caddyfile.template
 stack/Caddyfile
-stack/files/
+
+# Backups contain DECRYPTED credentials and the encryption key
 backups/
 *.tar.gz
+*.tar.gz.age
+stack/files/
+**/files/
 
-# OCI launch payload - contains tenancy/compartment OCIDs and your SSH key
+# OCI launch payload - tenancy/compartment OCIDs and your SSH key
 launch.json
 
-# SSH keys
+# Keys
 *.pem
 *.key
-id_*
+id_rsa*
+id_ed25519*
+identity.txt
+recipient.txt
+
+# --- Noise ---
+*.log
+.DS_Store

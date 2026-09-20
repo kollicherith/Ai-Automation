@@ -3,8 +3,14 @@
 # No Caddy, no DuckDNS, no ports open to the internet.
 services:
   n8n:
-    image: docker.n8n.io/n8nio/n8n
+    image: docker.n8n.io/n8nio/n8n:${N8N_VERSION:-2.40.3}
     restart: unless-stopped
+    # Cap container logs so a chatty workflow cannot fill the boot volume.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       - N8N_HOST=${DOMAIN}
       - N8N_PORT=5678
@@ -20,6 +26,22 @@ services:
       - N8N_LOG_LEVEL=${N8N_LOG_LEVEL:-warn}
       - EXECUTIONS_DATA_PRUNE=true
       - EXECUTIONS_DATA_MAX_AGE=${EXECUTIONS_DATA_MAX_AGE:-168}
+      # --- Hardening ---
+      # Code nodes and expressions must not be able to read process.env:
+      # N8N_ENCRYPTION_KEY lives there. Default was false before n8n 2.0, so set
+      # it explicitly rather than relying on the version.
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=true
+      # Block file nodes from reading n8n's own config dir (holds the key file).
+      - N8N_BLOCK_FILE_ACCESS_TO_N8N_FILES=true
+      # Confine file nodes to the mounted dir. In n8n 2.x this defaults to
+      # ~/.n8n-files, which would make the ./files mount unreadable to nodes.
+      - N8N_RESTRICT_FILE_ACCESS_TO=/files
+      # Nothing here needs the public REST API. Off is one less attack surface.
+      - N8N_PUBLIC_API_DISABLED=true
+      # Session cookie over HTTPS only. Never set this false to dodge a cert
+      # error - it sends the session cookie in clear.
+      - N8N_SECURE_COOKIE=true
+      - N8N_DIAGNOSTICS_ENABLED=false
     volumes:
       - n8n_data:/home/node/.n8n
       - ./files:/files
