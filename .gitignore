@@ -1,0 +1,16 @@
+# Never commit these - the encryption key decrypts every stored credential,
+# and the exports are decrypted plaintext.
+.env
+stack/.env
+stack/Caddyfile
+stack/files/
+backups/
+*.tar.gz
+
+# OCI launch payload - contains tenancy/compartment OCIDs and your SSH key
+launch.json
+
+# SSH keys
+*.pem
+*.key
+id_*

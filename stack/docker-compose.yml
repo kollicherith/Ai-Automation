@@ -1,0 +1,46 @@
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - n8n
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    restart: unless-stopped
+    environment:
+      - N8N_HOST=${DOMAIN}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - WEBHOOK_URL=https://${DOMAIN}/
+      - N8N_EDITOR_BASE_URL=https://${DOMAIN}/
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_PROXY_HOPS=1
+      - N8N_RUNNERS_ENABLED=true
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      - TZ=${GENERIC_TIMEZONE}
+      # Keep the SQLite database from growing without bound (troubleshooting.md 8).
+      - N8N_LOG_LEVEL=${N8N_LOG_LEVEL:-warn}
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=${EXECUTIONS_DATA_MAX_AGE:-168}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./files:/files
+    # Lets n8n reach a host-installed Ollama at http://host.docker.internal:11434/v1.
+    # Harmless when Ollama is not installed.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    expose:
+      - "5678"
+
+volumes:
+  n8n_data:
+  caddy_data:
+  caddy_config:

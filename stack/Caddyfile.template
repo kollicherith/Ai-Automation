@@ -1,0 +1,5 @@
+# Caddy does not read .env - the domain must be literal here.
+# scripts/deploy.sh fills in the hostname below and writes ./Caddyfile.
+__DOMAIN__ {
+    reverse_proxy n8n:5678
+}
